@@ -29,71 +29,97 @@ int main(int argc, char** argv)
 
   twitter::client client(auth);
 
-  verbly::data database {config["verbly_datafile"].as<std::string>()};
+  verbly::database database(config["verbly_datafile"].as<std::string>());
 
-  verbly::noun fruit1 = database.nouns().with_wnid(113134947).run().front(); // fruit
-  verbly::noun fruit2 = database.nouns().with_wnid(107705931).run().front(); // edible fruit
-  verbly::filter<verbly::noun> fruitFilter {fruit1, fruit2};
-  fruitFilter.set_orlogic(true);
+  verbly::filter fruitFilter = (
+    (verbly::notion::partOfSpeech == verbly::part_of_speech::noun)
+    && (verbly::notion::fullHypernyms %= (
+      (verbly::notion::wnid == 113134947) // fruit
+      || (verbly::notion::wnid == 107705931)))); // edible fruit
 
-  verbly::noun plants = database.nouns().with_wnid(100017222).run().front(); // plant
-  verbly::noun drugs = database.nouns().with_wnid(103247620).run().front(); // drug
-  verbly::noun animals = database.nouns().with_wnid(100015388).run().front(); // animal
+  verbly::query<verbly::word> fruitQuery = database.words(fruitFilter);
+
+  verbly::query<verbly::word> pertainymQuery = database.words(
+    (verbly::notion::partOfSpeech == verbly::part_of_speech::adjective)
+    && (verbly::word::antiPertainyms));
+
+  verbly::query<verbly::word> antiMannernymQuery = database.words(
+    (verbly::notion::partOfSpeech == verbly::part_of_speech::adjective)
+    && (verbly::word::mannernyms));
 
   for (;;)
   {
     std::cout << "Generating tweet" << std::endl;
 
-    auto n1 = database.nouns().full_hyponym_of(fruitFilter).random().limit(1).run();
-    auto n1w = n1.front();
-    auto n1hq = database.nouns().hypernym_of(n1w).limit(1).run();
-    auto n1h = n1hq.front();
+    verbly::word fruit = fruitQuery.first();
+    verbly::word hyper = database.words(verbly::notion::hyponyms %= fruit).first();
 
     std::list<std::string> tokens;
 
     int choice = std::uniform_int_distribution<int>(0,2)(random_engine);
     if (choice == 0)
     {
-      auto descriptor = database.adjectives().is_pertainymic().random().limit(1).run();
-      tokens.push_back(descriptor.front().base_form());
+      verbly::word descriptor = pertainymQuery.first();
+      tokens.push_back(descriptor.getBaseForm());
     } else if (choice == 1)
     {
-      auto descriptor = database.adjectives().is_mannernymic().random().limit(1).run();
-      tokens.push_back(descriptor.front().base_form());
+      verbly::word descriptor = antiMannernymQuery.first();
+      tokens.push_back(descriptor.getBaseForm());
     }
 
-    auto plantThing = database.nouns();
+    verbly::filter thingFilter = (
+      (verbly::notion::partOfSpeech == verbly::part_of_speech::noun)
+      && (verbly::form::proper == false)
+      && (verbly::form::complexity == 1));
+
     choice = std::uniform_int_distribution<int>(0,4)(random_engine);
     if (choice < 3)
     {
       if (choice == 0)
       {
-        plantThing.full_hyponym_of(plants);
+        // plant
+        thingFilter &= (verbly::notion::fullHypernyms %= (verbly::notion::wnid == 100017222));
       } else if (choice == 1)
       {
-        plantThing.full_hyponym_of(drugs);
+        // drug
+        thingFilter &= (verbly::notion::fullHypernyms %= (verbly::notion::wnid == 103247620));
       } else if (choice == 2)
       {
-        plantThing.full_hyponym_of(animals);
+        // animal
+        thingFilter &= (verbly::notion::fullHypernyms %= (verbly::notion::wnid == 100015388));
       }
 
-      plantThing.is_not_proper().with_complexity(1).random().limit(1);
-      tokens.push_back(plantThing.run().front().base_form());
+      verbly::word thing = database.words(thingFilter).first();
+      tokens.push_back(thing.getBaseForm());
     }
 
-    auto similar = database.nouns().full_hyponym_of(n1h).except(n1w).is_not_proper().with_complexity(1).random().limit(1).run();
-    if (!similar.empty())
+    verbly::query<verbly::word> similarQuery = database.words(
+      (verbly::notion::partOfSpeech == verbly::part_of_speech::noun)
+      && (verbly::notion::fullHypernyms %= hyper)
+      && (verbly::form::text != fruit.getBaseForm())
+      && (verbly::word::id != hyper.getId())
+      && (verbly::form::proper == false)
+      && (verbly::form::complexity == 1));
+    std::vector<verbly::word> similarResults = similarQuery.all();
+
+    if (!similarResults.empty())
     {
-      tokens.push_back(similar.front().base_form());
+      tokens.push_back(similarResults.front().getBaseForm());
     } else {
-      auto different = database.nouns().full_hyponym_of(fruitFilter).except(n1w).is_not_proper().with_complexity(1).random().limit(1).run();
-      tokens.push_back(different.front().base_form());
+      verbly::query<verbly::word> differentQuery = database.words(
+        fruitFilter
+        && (verbly::form::text != fruit.getBaseForm())
+        && (verbly::word::id != hyper.getId())
+        && (verbly::form::proper == false)
+        && (verbly::form::complexity == 1));
+
+      tokens.push_back(differentQuery.first().getBaseForm());
     }
 
     std::string fruitName = verbly::implode(std::begin(tokens), std::end(tokens), " ");
 
     std::ostringstream result;
-    result << n1.front().base_form();
+    result << fruit.getBaseForm();
     result << "? ";
 
     choice = std::uniform_int_distribution<int>(0,3)(random_engine);
