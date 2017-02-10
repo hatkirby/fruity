@@ -54,17 +54,15 @@ int main(int argc, char** argv)
     verbly::word fruit = fruitQuery.first();
     verbly::word hyper = database.words(verbly::notion::hyponyms %= fruit).first();
 
-    std::list<std::string> tokens;
+    verbly::token utterance;
 
     int choice = std::uniform_int_distribution<int>(0,2)(random_engine);
     if (choice == 0)
     {
-      verbly::word descriptor = pertainymQuery.first();
-      tokens.push_back(descriptor.getBaseForm());
+      utterance << pertainymQuery.first();
     } else if (choice == 1)
     {
-      verbly::word descriptor = antiMannernymQuery.first();
-      tokens.push_back(descriptor.getBaseForm());
+      utterance << antiMannernymQuery.first();
     }
 
     verbly::filter thingFilter = (
@@ -89,37 +87,36 @@ int main(int argc, char** argv)
         thingFilter &= (verbly::notion::fullHypernyms %= (verbly::notion::wnid == 100015388));
       }
 
-      verbly::word thing = database.words(thingFilter).first();
-      tokens.push_back(thing.getBaseForm());
+      utterance << database.words(thingFilter).first();
     }
 
     verbly::query<verbly::word> similarQuery = database.words(
       (verbly::notion::partOfSpeech == verbly::part_of_speech::noun)
       && (verbly::notion::fullHypernyms %= hyper)
-      && (verbly::form::text != fruit.getBaseForm())
-      && (verbly::word::id != hyper.getId())
+      && !fruit.getBaseForm()
+      && !hyper
       && (verbly::form::proper == false)
       && (verbly::form::complexity == 1));
     std::vector<verbly::word> similarResults = similarQuery.all();
 
     if (!similarResults.empty())
     {
-      tokens.push_back(similarResults.front().getBaseForm());
+      utterance << similarResults.front();
     } else {
       verbly::query<verbly::word> differentQuery = database.words(
         fruitFilter
-        && (verbly::form::text != fruit.getBaseForm())
-        && (verbly::word::id != hyper.getId())
+        && !fruit.getBaseForm()
+        && !hyper
         && (verbly::form::proper == false)
         && (verbly::form::complexity == 1));
 
-      tokens.push_back(differentQuery.first().getBaseForm());
+      utterance << differentQuery.first();
     }
 
-    std::string fruitName = verbly::implode(std::begin(tokens), std::end(tokens), " ");
+    std::string fruitName = utterance.compile();
 
     std::ostringstream result;
-    result << fruit.getBaseForm();
+    result << fruit.getBaseForm().getText();
     result << "? ";
 
     choice = std::uniform_int_distribution<int>(0,3)(random_engine);
